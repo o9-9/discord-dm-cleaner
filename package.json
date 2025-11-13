@@ -1,0 +1,17 @@
+{
+  "name": "discord-dm-cleaner",
+  "version": "1.1.0",
+  "description": "Discord DM cleaner tool",
+  "main": "zyp.js",
+  "type": "module",
+  "scripts": {
+    "start": "node zyp.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "readline-sync": "^1.4.10"
+  },
+  "keywords": ["discord", "dm", "cleaner", "tool"],
+  "author": "Zypheriss",
+  "license": "MIT"
+}
