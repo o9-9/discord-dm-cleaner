@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-  workflow_dispatch: # Allow manual trigger after fork
+  workflow_dispatch:
 
 jobs:
   translate:
@@ -24,11 +24,11 @@ jobs:
           python-version: "3.11"
 
       - name: Install Dependencies
-        run: pip install openai
+        run: pip install google-generativeai
 
       - name: Translate All Files to English
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python .github/scripts/translate_files.py
 
       - name: Commit & Push Translated Files
