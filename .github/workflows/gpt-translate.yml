@@ -1,0 +1,28 @@
+name: GPT Translate README to English (Auto)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "README.md"
+  workflow_dispatch:
+
+jobs:
+  gpt-translate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: GPT Translate README.md to English
+        uses: 3ru/gpt-translate@v1.3
+        with:
+          apikey: ${{ secrets.OPENAI_API_KEY }}
+          model: "gpt-4o"
+          inputFiles: "README.md"
+          outputFiles: "README.md"
+          languages: "English"
