@@ -1,11 +1,12 @@
 import os
 import sys
+import time
 from pathlib import Path
-from openai import OpenAI
+import google.generativeai as genai
 
 # ──────────────────────────────────────────────
 # Configuration
-# ──────────────────────────────────────────────
+# ────────────────────────��─────────────────────
 SUPPORTED_EXTENSIONS = {
     ".md", ".txt", ".rst", ".html", ".htm",
     ".json", ".yaml", ".yml", ".csv", ".xml",
@@ -14,49 +15,57 @@ SUPPORTED_EXTENSIONS = {
     ".sh", ".bash", ".toml", ".ini", ".cfg"
 }
 
-# Directories to skip entirely
 SKIP_DIRS = {
     ".git", "node_modules", "__pycache__",
     ".venv", "venv", "dist", "build", ".github"
 }
 
-client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+# Free tier: 15 requests per minute → wait 4s between requests to stay safe
+REQUEST_DELAY_SECONDS = 4
+
+# ──────────────────────────────────────────────
+# Init Gemini
+# ──────────────────────────────────────────────
+genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+model = genai.GenerativeModel("gemini-2.0-flash")
 
 
 def should_translate(text: str) -> bool:
-    """Skip files that are already in English or purely code/data."""
-    # Basic heuristic: skip very short files
+    """Skip files that are empty or too short to translate."""
     return len(text.strip()) > 20
 
 
 def translate_to_english(content: str, file_ext: str) -> str:
-    """Translate content to English while preserving format."""
+    """Translate content to English while strictly preserving format."""
     prompt = f"""You are a professional translator. Translate the following file content to English.
 
-CRITICAL RULES:
-1. Preserve ALL formatting exactly: indentation, line breaks, blank lines, spacing.
-2. Do NOT translate: code syntax, variable names, function names, class names, import statements, file paths, URLs, HTML/XML tags, JSON keys, YAML keys, command-line flags, regex patterns, or any technical identifiers.
-3. Only translate: human-readable text, comments, string values that are natural language, documentation, and descriptions.
-4. Keep the exact same file structure and format as the input.
-5. Do NOT add any extra text, explanations, or markdown wrappers.
-6. File type: {file_ext}
+CRITICAL RULES — YOU MUST FOLLOW ALL OF THEM:
+1. Preserve ALL formatting EXACTLY: indentation, line breaks, blank lines, spacing, tabs.
+2. Do NOT translate: code syntax, variable names, function names, class names, import statements,
+   file paths, URLs, HTML/XML tags, JSON keys, YAML keys, command-line flags, regex patterns,
+   package names, or any technical identifiers.
+3. Only translate: human-readable natural language text, comments, string values that are
+   natural language sentences, documentation text, and descriptions.
+4. Keep the EXACT same file structure and format as the input — character for character except
+   for the translated human-readable text.
+5. Do NOT add any extra explanation, markdown code fences, or wrapper text.
+6. If the content is already fully in English, return it UNCHANGED.
+7. File type: {file_ext}
 
-Content to translate:
+Content:
 {content}"""
 
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.1,  # Low temperature for consistent, accurate translation
+    response = model.generate_content(
+        prompt,
+        generation_config=genai.types.GenerationConfig(temperature=0.1),
     )
-    return response.choices[0].message.content
+    return response.text
 
 
 def get_all_files(root: Path):
     """Recursively yield all translatable files."""
-    for path in root.rglob("*"):
+    for path in sorted(root.rglob("*")):
         if path.is_file():
-            # Skip hidden/system directories
             if any(part in SKIP_DIRS for part in path.parts):
                 continue
             if path.suffix.lower() in SUPPORTED_EXTENSIONS:
@@ -66,27 +75,46 @@ def get_all_files(root: Path):
 def main():
     root = Path(".")
     files = list(get_all_files(root))
-    print(f"Found {len(files)} translatable file(s).")
+    total = len(files)
+    print(f"Found {total} translatable file(s).\n")
 
-    for file_path in files:
+    success = 0
+    skipped = 0
+    errors = 0
+
+    for i, file_path in enumerate(files, 1):
         try:
             original = file_path.read_text(encoding="utf-8", errors="ignore")
 
             if not should_translate(original):
-                print(f"  Skipping (too short or empty): {file_path}")
+                print(f"[{i}/{total}] ⏭️  Skipping (empty/too short): {file_path}")
+                skipped += 1
                 continue
 
-            print(f"  Translating: {file_path} ...")
+            print(f"[{i}/{total}] 🌐 Translating: {file_path} ...")
             translated = translate_to_english(original, file_path.suffix)
 
-            # Write back in-place, preserving the original file
+            # Write back in-place, preserving the original filename & location
             file_path.write_text(translated, encoding="utf-8")
-            print(f"  ✅ Done: {file_path}")
+            print(f"[{i}/{total}] ✅ Done: {file_path}")
+            success += 1
+
+            # Respect free-tier rate limit (15 RPM = 1 req/4s)
+            if i < total:
+                time.sleep(REQUEST_DELAY_SECONDS)
 
         except Exception as e:
-            print(f"  ⚠️  Error translating {file_path}: {e}", file=sys.stderr)
+            print(f"[{i}/{total}] ⚠️  Error translating {file_path}: {e}", file=sys.stderr)
+            errors += 1
+            # Wait before retrying next file to avoid cascading rate-limit errors
+            time.sleep(REQUEST_DELAY_SECONDS)
 
-    print("\n✅ Translation complete.")
+    print(f"\n── Summary ──────────────────────")
+    print(f"  ✅ Translated : {success}")
+    print(f"  ⏭️  Skipped   : {skipped}")
+    print(f"  ⚠️  Errors    : {errors}")
+    print(f"  📁 Total     : {total}")
+    print(f"─────────────────────────────────")
 
 
 if __name__ == "__main__":
